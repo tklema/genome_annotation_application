@@ -47,7 +47,7 @@ def get_window_around_breakpoint(chrom, pos, genes_tree, bp_type, window_size=50
     if chrom not in genes_tree:
         return (pos - window_size, pos + window_size, 'no_gene', None)
     
-    containing_genes = genes_tree[chrom].overlap(pos, pos)
+    containing_genes = genes_tree[chrom].at(pos)
     print("count of containing_genes: ", len(containing_genes))
     print()
 
