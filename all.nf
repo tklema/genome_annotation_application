@@ -4,22 +4,52 @@ params.genome1 = ""
 params.genome2 = ""
 params.config = ""
 params.hic = ""
+params.genes1 = ""
+params.genes2 = ""
 
-process Repeater2 {
+process Repeater2Genome1 {
     input:
     path genome
-    
+
     output:
-    path "repeater2_results"
-    
+    path "repeats1.bed"
+
     script:
     """
     source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
     conda activate nextflow_env
 
-    mkdir -p repeater2_results
     java -jar -Xms16g -Xmx64g ${projectDir}/../repeater2/dist/Repeater2.jar \\
-        ${genome} kmer=20 sln=100 -seqshow
+        ${genome} kmer=20 sln=200 -seqshow
+
+    cat *.gff | \\
+        awk -F'\\t' '/^[^#]/ && \$4 ~ /^[0-9]+\$/ {
+            split(\$1, a, " ")
+            print a[1], \$4-1, \$5, \$3
+        }' OFS='\\t' > repeats1.bed
+    """
+}
+
+process Repeater2Genome2 {
+    input:
+    path genome
+
+    output:
+    path "repeats2.bed"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate nextflow_env
+
+    java -jar -Xms16g -Xmx64g ${projectDir}/../repeater2/dist/Repeater2.jar \\
+        ${genome} kmer=20 sln=200 -seqshow
+
+    cat *.gff | \\
+        awk -F'\\t' '/^[^#]/ && \$4 ~ /^[0-9]+\$/ {
+            split(\$1, a, " ")
+            print a[1], \$4-1, \$5, \$3
+        }' OFS='\\t' > repeats2.bed
     """
 }
 
@@ -217,13 +247,41 @@ process RunComparison {
     """
 }
 
+process AnnotateBreakpointsWithRepeats {
+    input:
+    path syri_mapped
+    path repeats1
+    path repeats2
+    path genome1
+    path genome2
+    path genes1
+    path genes2
+
+    output:
+    path "breakpoints_with_repeats.tsv"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate syri
+    
+    python ${projectDir}/annotate_breakpoints.py \
+        --syri ${syri_mapped} \
+        --repeats1 ${repeats1} \
+        --repeats2 ${repeats2} \
+        --genes1 ${genes1} \
+        --genes2 ${genes2}
+    """
+}
+
 workflow {
     genome1 = file(params.genome1)
     genome2 = file(params.genome2)
     config = file(params.config)
     hic_file = file(params.hic)
 
-    Repeater2(genome1)
+    repeats1 = Repeater2Genome1(genome1)
+    repeats2 = Repeater2Genome2(genome2)
 
     synthetic_genomes = CreateSyntheticGenomes(genome1, genome2, config)
     syri_out = SyRI(synthetic_genomes[0], synthetic_genomes[1])
@@ -233,4 +291,17 @@ workflow {
     eaglec = EagleC(hic_file, genome1)
 
     RunComparison(syri_mapped, eaglec)
+
+    genes1 = file(params.genes1)
+    genes2 = file(params.genes2)
+
+    breakpoint_annotation = AnnotateBreakpointsWithRepeats(
+        syri_mapped,
+        repeats1,
+        repeats2,
+        genome1,
+        genome2,
+        genes1,
+        genes2
+    )
 }
