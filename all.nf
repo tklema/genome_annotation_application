@@ -7,6 +7,8 @@ params.hic = ""
 params.genes1 = ""
 params.genes2 = ""
 
+params.eaglec = ""
+
 process Repeater2Genome1 {
     input:
     path genome
@@ -227,6 +229,7 @@ process RunComparison {
     path eaglec2
 
     output:
+    path "syri_matched.tsv"
     path "matches.tsv"
     path "comparison_stats.txt"
 
@@ -241,9 +244,7 @@ process RunComparison {
     python ${projectDir}/compare_syri_eaglec2.py \
         --syri "$syri" \
         --eaglec2 "$eaglec2" \
-        --output "matches.tsv" \
-        --sample "rice" \
-        --pad 100000 > comparison_stats.txt
+        --sample "rice" > comparison_stats.txt
     """
 }
 
@@ -274,6 +275,62 @@ process AnnotateBreakpointsWithRepeats {
     """
 }
 
+process PrepareIGVSessions {
+    input:
+    path breakpoints_tsv
+    path genes1
+    path genes2
+    path repeats1
+    path repeats2
+    path genome1_fa
+    path genome2_fa
+
+    output:
+    path "session_genome1.xml"
+    path "session_genome2.xml"
+    path "breakpoints_genome1.bed"
+    path "breakpoints_genome2.bed"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate syri
+
+    # Создаем индексы для FASTA
+    samtools faidx ${genome1_fa}
+    samtools faidx ${genome2_fa}
+
+    # Разделяем брейкпоинты по геномам
+    python ${projectDir}/split_breakpoints.py ${breakpoints_tsv}
+
+    # Сессия для genome1
+    cat > session_genome1.xml << EOF
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Session genome="${genome1_fa}" locus="Chr1:1-1000000" version="8">
+        <Resources>
+            <Resource path="./${genome1_fa}"/>
+            <Resource path="./${genes1}"/>
+            <Resource path="./${repeats1}"/>
+            <Resource path="./breakpoints_genome1.bed"/>
+        </Resources>
+    </Session>
+    EOF
+
+    # Сессия для genome2
+    cat > session_genome2.xml << EOF
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Session genome="${genome2_fa}" locus="CP056056.1:1-1000000" version="8">
+        <Resources>
+            <Resource path="./${genome2_fa}"/>
+            <Resource path="./${genes2}"/>
+            <Resource path="./${repeats2}"/>
+            <Resource path="./breakpoints_genome2.bed"/>
+        </Resources>
+    </Session>
+    EOF
+    """
+}
+
 workflow {
     genome1 = file(params.genome1)
     genome2 = file(params.genome2)
@@ -288,20 +345,32 @@ workflow {
 
     syri_mapped = MappingSyriResults(syri_out, synthetic_genomes[2], genome1, genome2)
 
-    eaglec = EagleC(hic_file, genome1)
+    // eaglec = EagleC(hic_file, genome1)
+    eaglec = file(params.eaglec)
 
-    RunComparison(syri_mapped, eaglec)
+    comparison = RunComparison(syri_mapped, eaglec)
+    syri_filtered = comparison[0]
 
     genes1 = file(params.genes1)
     genes2 = file(params.genes2)
 
     breakpoint_annotation = AnnotateBreakpointsWithRepeats(
-        syri_mapped,
+        syri_filtered,
         repeats1,
         repeats2,
         genome1,
         genome2,
         genes1,
         genes2
+    )
+
+    PrepareIGVSessions(
+        breakpoint_annotation,
+        genes1,
+        genes2,
+        repeats1,
+        repeats2,
+        genome1,
+        genome2
     )
 }
