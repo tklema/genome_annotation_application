@@ -330,6 +330,41 @@ process PrepareIGVSessions {
     """
 }
 
+process Visualize {
+    input:
+    path structural_variants
+    path genome1
+    path genome2
+    path repeats1
+    path repeats2
+    path genes1
+    path genes2
+    path config
+
+    output:
+    path "visualizer"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate python_sv
+
+    mkdir visualizer
+
+    "${genome1} genome1" > genomes.txt
+    "${genome2} genome2" >> genomes.txt
+
+    python ${projectDir}/visualizer.py \
+        --sr ${structural_variants} \
+        --genomes genomes.txt \
+        --ref-repeats ${repeats1} \
+        --qry-repeats ${repeats2} \
+        --ref-genes ${genes1} \
+        --qry-genes ${genes2} \
+        --mapping ${config}
+    """
+}
+
 workflow {
     genome1 = file(params.genome1)
     genome2 = file(params.genome2)
@@ -371,5 +406,16 @@ workflow {
         repeats2,
         genome1,
         genome2
+    )
+
+    Visualize(
+        breakpoint_annotation,
+        genome1,
+        genome2,
+        repeats1,
+        repeats2,
+        genes1,
+        genes2,
+        config
     )
 }

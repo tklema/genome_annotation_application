@@ -800,7 +800,7 @@ def visualizer(args):
             )
             legend3._legend_box.align = "left"
 
-        output_file = f"group{group_idx}"
+        output_file = f"visualizer/group{group_idx}"
         fig.savefig(
             output_file,
             dpi=DPI,
