@@ -243,8 +243,7 @@ process RunComparison {
 
     python ${projectDir}/compare_syri_eaglec2.py \
         --syri "$syri" \
-        --eaglec2 "$eaglec2" \
-        --sample "rice" > comparison_stats.txt
+        --eaglec2 "$eaglec2" > comparison_stats.txt
     """
 }
 
