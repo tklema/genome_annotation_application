@@ -55,6 +55,26 @@ process Repeater2Genome2 {
     """
 }
 
+process ExtractGenes {
+    input:
+    path genes1
+    path genes2
+
+    output:
+    path "genes1.bed"
+    path "genes2.bed"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate syri
+
+    python scripts/extract_genes.py \\
+        --genes1 ${genes1} \\
+        --genes2 ${genes2}
+    """
+}
+
 process CreateSyntheticGenomes {
     input:
     path genome1
@@ -365,6 +385,46 @@ process Visualize {
     """
 }
 
+process SpectralTADAnalysis {
+    input:
+    path hic
+
+    output:
+    path "spectraltad_results"
+
+    shell:
+    '''
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate EagleC2
+
+    mkdir -p spectraltad_results
+
+    RES_LIST=$(cooler ls !{hic} | grep -oP '\\d+' | sort -n)
+    echo "Resolutions: $RES_LIST"
+
+    BEST_RES=0
+    for res in $RES_LIST; do
+        if [ $res -le 200000 ]; then
+            if [ $res -ge 100000 ]; then
+                if [ $((100000 - BEST_RES)) -gt $((res - 100000)) ]; then
+                    BEST_RES=$res
+                fi
+                break
+            fi
+            BEST_RES=$res
+        fi
+    done
+
+    echo "BEST_RES: $BEST_RES"
+
+    cooler dump --join !{hic}::/resolutions/$BEST_RES > spectraltad_matrix.txt
+
+    Rscript !{projectDir}/spectraltad.R \\
+        --matrix spectraltad_matrix.txt \\
+        --output spectraltad_results/
+    '''
+}
+
 workflow {
     genome1 = file(params.genome1)
     genome2 = file(params.genome2)
@@ -385,8 +445,12 @@ workflow {
     comparison = RunComparison(syri_mapped, eaglec)
     syri_filtered = comparison[0]
 
-    genes1 = file(params.genes1)
-    genes2 = file(params.genes2)
+    // genes1 = file(params.genes1)
+    // genes2 = file(params.genes2)
+
+    genes = ExtractGenes(file(params.genes1), file(params.genes2))
+    genes1 = genes[0]
+    genes2 = genes[1]
 
     breakpoint_annotation = AnnotateBreakpointsWithRepeats(
         syri_filtered,
@@ -418,4 +482,6 @@ workflow {
         genes2,
         config
     )
+
+    SpectralTADAnalysis(hic_file)
 }
