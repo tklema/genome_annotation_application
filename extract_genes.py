@@ -20,8 +20,10 @@ def load_genes(gene_file):
                         dtype={0: str, 3: np.int64, 4: np.int64})
     genes.columns = ['chrom', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes']
 
-    if 'gene' in genes['feature'].values:
-        genes = genes[genes['feature'] == 'gene']
+    # if 'gene' in genes['feature'].values:
+    if genes['feature'].str.contains('gene', na=False).any():
+        #genes = genes[genes['feature'] == 'gene']
+        genes = genes[genes['feature'].str.contains('gene', na=False)]
         genes['gene_id'] = genes['attributes'].apply(extract_gene_id)
     else:
         genes['gene_id'] = genes['attributes'].apply(extract_gene_id)

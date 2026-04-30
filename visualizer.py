@@ -718,6 +718,15 @@ def filter_alignments_for_group(alignments, ref_chroms, query_chroms, composite)
 
     return group_alignments
 
+def is_valid_mapping_pair(ref_chroms, query_chroms, chromosome_lengths):
+    for ref_chrom in ref_chroms:
+        if ref_chrom not in chromosome_lengths[0][1]:
+            return False
+    for query_chrom in query_chroms:
+        if query_chrom not in chromosome_lengths[1][1]:
+            return False
+    return True
+
 def visualizer(args):
     print('Start visualizing')
     matplotlib.use('agg')
@@ -729,6 +738,8 @@ def visualizer(args):
     chromosome_lengths, genomes = validate_alignment_to_fasta(
         alignments, args.genomes.name
     )
+    print("chromosome_lengths:")
+    print(chromosome_lengths)
 
     alignments = filter_input_data(alignments)
     alignments = fix_inversion_coordinates(alignments)
@@ -740,6 +751,10 @@ def visualizer(args):
 
     for group_idx, (ref_chroms, query_chroms) in enumerate(mapping_pairs, 1):
         print(f"Processing group: {','.join(ref_chroms)} -> {','.join(query_chroms)}")
+
+        if not is_valid_mapping_pair(ref_chroms, query_chroms, chromosome_lengths):
+            print(f"Warning: pair [{ref_chroms}:{query_chroms}] isn't valid. Please check breakpoint annotation or genome")
+            continue
 
         composite = CompositeCoordinateSystem(
             ref_chroms, query_chroms, chromosome_lengths

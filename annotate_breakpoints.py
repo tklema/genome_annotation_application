@@ -246,29 +246,37 @@ def build_gene_regions(df):
     }).reset_index()
 
 
+#def load_genes(gene_file):
+#    print(f"Loading genes from: {gene_file}")
+#    
+#    genes = pd.read_csv(gene_file, sep='\t', comment='#', header=None,
+#                        dtype={0: str, 3: np.int64, 4: np.int64})
+#    genes.columns = ['chrom', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes']
+#    
+#    if gene_file.endswith('.gtf'):
+#        print("  Detected GTF format")
+#        genes['gene_id'] = genes['attributes'].apply(extract_gene_id_gtf)
+#        genes = build_gene_regions(genes)
+#    elif gene_file.endswith(('.gff', '.gff3')):
+#        print("  Detected GFF3 format")
+#        genes = genes[genes['feature'] == 'gene']
+#        genes['gene_id'] = genes['attributes'].apply(extract_gene_id_gff3)
+#        genes = genes[['chrom', 'start', 'end', 'gene_id']]
+#    else:
+#        raise ValueError(f"Unknown file format: {gene_file}")
+#    
+#    genes = genes[genes['start'] < genes['end']]
+#    print(f"  Loaded {len(genes)} genes")
+#    return genes
+
 def load_genes(gene_file):
     print(f"Loading genes from: {gene_file}")
     
-    genes = pd.read_csv(gene_file, sep='\t', comment='#', header=None,
-                        dtype={0: str, 3: np.int64, 4: np.int64})
-    genes.columns = ['chrom', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attributes']
-    
-    if gene_file.endswith('.gtf'):
-        print("  Detected GTF format")
-        genes['gene_id'] = genes['attributes'].apply(extract_gene_id_gtf)
-        genes = build_gene_regions(genes)
-    elif gene_file.endswith(('.gff', '.gff3')):
-        print("  Detected GFF3 format")
-        genes = genes[genes['feature'] == 'gene']
-        genes['gene_id'] = genes['attributes'].apply(extract_gene_id_gff3)
-        genes = genes[['chrom', 'start', 'end', 'gene_id']]
-    else:
-        raise ValueError(f"Unknown file format: {gene_file}")
-    
-    genes = genes[genes['start'] < genes['end']]
+    genes = pd.read_csv(gene_file, sep='\t', header=None,
+                        names=['chrom', 'start', 'end', 'gene_id'],
+                        dtype={0: str, 1: np.int64, 2: np.int64, 3: str})
     print(f"  Loaded {len(genes)} genes")
     return genes
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -322,7 +330,8 @@ def main():
             'ref_end': sv['ref_end'],
             'qry_chrom': sv['qry_chrom'],
             'qry_start': sv['qry_start'],
-            'qry_end': sv['qry_end']
+            'qry_end': sv['qry_end'],
+            'confirmed_by_eaglec': sv['confirmed_by_eaglec']
         }
         
         ref_chrom = str(sv['ref_chrom'])

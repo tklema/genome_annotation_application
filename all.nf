@@ -7,7 +7,31 @@ params.hic = ""
 params.genes1 = ""
 params.genes2 = ""
 
+params.genome3 = ""
 params.eaglec = ""
+params.syri_filtered = ""
+params.repeats1 = ""
+params.repeats2 = ""
+params.mapped_svs = ""
+
+process Repeater2 {
+    input:
+    path genome
+
+    output:
+    path "repeats1.bed"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate nextflow_env
+
+    > repeats1.bed
+
+    java -jar -Xms16g -Xmx64g ${projectDir}/../repeater2/dist/Repeater2.jar \\
+        ${genome} kmer=20 sln=200 quick=false
+    """
+}
 
 process Repeater2Genome1 {
     input:
@@ -69,7 +93,7 @@ process ExtractGenes {
     source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
     conda activate syri
 
-    python scripts/extract_genes.py \\
+    python ${projectDir}/extract_genes.py \\
         --genes1 ${genes1} \\
         --genes2 ${genes2}
     """
@@ -185,37 +209,37 @@ process EagleC {
     output:
     path "eaglec_results/output.SV_calls.txt"
 
-    shell:
-    '''
+    script:
+    """
     source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
     conda activate EagleC2
 
-    echo !{projectDir}
+    echo ${projectDir}
 
     # Get resolutions and convert to comma-separated list
-    RES_LIST=$(cooler ls !{hic} | grep -oP '\\d+' | sort -n | tr '\n' ',' | sed 's/,$//')
-    echo "Resolutions list: $RES_LIST"
+    RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{printf "%s,", \$NF}' | sed 's/,\$//')
+    echo "Resolutions list: \$RES_LIST"
 
     # Get first resolution for chromosome filtering
-    FIRST_RES=$(echo "$RES_LIST" | cut -d',' -f1)
+    FIRST_RES=\$(echo "\$RES_LIST" | cut -d',' -f1)
+    echo "First Resolution: \$FIRST_RES"
 
     # Get chromosomes as space-separated list
-    CHROMOSOMES=$(cooler dump -t chroms "!{hic}::/resolutions/$FIRST_RES" 2>/dev/null | \\
-      awk '$2 >= 2000000 && $1 !~ /(ChrUn|random|scaffold|mito|Unknown)/ {printf "%s ", $1}' | sed 's/ $//')
+    CHROMOSOMES=\$(cooler dump -t chroms "${hic}::/resolutions/\$FIRST_RES" | awk '\$2 >= 2000000 {printf "%s ", \$1}' | sed 's/ \$//')
 
-    echo "Chromosomes: $CHROMOSOMES"
+    echo "Chromosomes: \$CHROMOSOMES"
 
     # Calculate intra and inter extend sizes based on resolutions
     INTRA_EX=""
     INTER_EX=""
 
     # Convert RES_LIST to array for processing
-    IFS=',' read -ra RES_ARRAY <<< "$RES_LIST"
-    for res in "${RES_ARRAY[@]}"; do
-        if [ $res -le 25000 ]; then
+    RES_ARRAY=(\$(echo "\$RES_LIST" | tr ',' ' '))
+    for res in "\${RES_ARRAY[@]}"; do
+        if [ \$res -le 25000 ]; then
             INTRA_EX+="3,"
             INTER_EX+="2,"
-        elif [ $res -le 100000 ]; then
+        elif [ \$res -le 100000 ]; then
             INTRA_EX+="2,"
             INTER_EX+="1,"
         else
@@ -224,23 +248,23 @@ process EagleC {
         fi
     done
 
-    INTRA_EX=${INTRA_EX%,}
-    INTER_EX=${INTER_EX%,}
+    INTRA_EX=\${INTRA_EX%,}
+    INTER_EX=\${INTER_EX%,}
 
-    echo "Intra extend sizes: $INTRA_EX"
-    echo "Inter extend sizes: $INTER_EX"
+    echo "Intra extend sizes: \$INTRA_EX"
+    echo "Inter extend sizes: \$INTER_EX"
 
     mkdir -p eaglec_results
-    predictSV --mcool !{hic} \\
-      --resolutions "$RES_LIST" \\
-      --intra-extend-size "$INTRA_EX" \\
-      --inter-extend-size "$INTER_EX" \\
-      --model-path !{projectDir}/../EagleC2-models \\
+    predictSV --mcool ${hic} \\
+      --resolutions "\$RES_LIST" \\
+      --intra-extend-size "\$INTRA_EX" \\
+      --inter-extend-size "\$INTER_EX" \\
+      --model-path ${projectDir}/../EagleC2-models \\
       -g other \\
-      -C $CHROMOSOMES \\
+      -C \$CHROMOSOMES \\
       -p 16 --prob-cutoff-1 0.05 \\
       -O eaglec_results/output
-    '''
+    """
 }
 
 process RunComparison {
@@ -371,8 +395,8 @@ process Visualize {
 
     mkdir visualizer
 
-    "${genome1} genome1" > genomes.txt
-    "${genome2} genome2" >> genomes.txt
+    echo -e "${genome1}\tgenome1" > genomes.txt
+    echo -e "${genome2}\tgenome2" >> genomes.txt
 
     python ${projectDir}/visualizer.py \
         --sr ${structural_variants} \
@@ -425,63 +449,96 @@ process SpectralTADAnalysis {
     '''
 }
 
+process RunRepeatOBserver {
+    input:
+    path genome
+
+    output:
+    path "SpeciesName_H0-AT_Centromere_histograms_summary.txt"
+
+    script:
+    """
+    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    conda activate EagleC2
+
+    bash ${projectDir}/Setup_Run_Repeats.sh \\
+        -i SpeciesName \\
+        -f ${genome} \\
+        -h H0 \\
+        -c 15 \\
+        -m 100000 \\
+        -g FALSE
+
+    cp output_chromosomes/SpeciesName_H0-AT/Summary_output/histograms/SpeciesName_H0-AT_Centromere_histograms_summary.txt .
+    """
+}
+
 workflow {
     genome1 = file(params.genome1)
     genome2 = file(params.genome2)
+    genome3 = file(params.genome3)
     config = file(params.config)
     hic_file = file(params.hic)
 
-    repeats1 = Repeater2Genome1(genome1)
-    repeats2 = Repeater2Genome2(genome2)
+    //repeats = Repeater2(genome1)
 
-    synthetic_genomes = CreateSyntheticGenomes(genome1, genome2, config)
-    syri_out = SyRI(synthetic_genomes[0], synthetic_genomes[1])
+    //repeats1 = Repeater2Genome1(genome1)
+    //repeats2 = Repeater2Genome2(genome2)
+    repeats1 = file(params.repeats1)
+    repeats2 = file(params.repeats2)
 
-    syri_mapped = MappingSyriResults(syri_out, synthetic_genomes[2], genome1, genome2)
+    //synthetic_genomes = CreateSyntheticGenomes(genome1, genome2, config)
+    //syri_out = SyRI(synthetic_genomes[0], synthetic_genomes[1])
 
-    // eaglec = EagleC(hic_file, genome1)
-    eaglec = file(params.eaglec)
+    //syri_mapped = MappingSyriResults(syri_out, synthetic_genomes[2], genome1, genome2)
+    //syri_mapped = file(params.mapped_svs)
 
-    comparison = RunComparison(syri_mapped, eaglec)
-    syri_filtered = comparison[0]
+    //eaglec = EagleC(hic_file, genome1)
+    //eaglec = file(params.eaglec)
 
-    // genes1 = file(params.genes1)
-    // genes2 = file(params.genes2)
+    //comparison = RunComparison(syri_mapped, eaglec)
+    //syri_filtered = comparison[0]
+    //syri_filtered = file(params.syri_filtered)
+    //syri_filtered = file(params.mapped_svs)
 
-    genes = ExtractGenes(file(params.genes1), file(params.genes2))
-    genes1 = genes[0]
-    genes2 = genes[1]
+    //genes = ExtractGenes(file(params.genes1), file(params.genes2))
+    //genes1 = genes[0]
+    //genes2 = genes[1]
 
-    breakpoint_annotation = AnnotateBreakpointsWithRepeats(
-        syri_filtered,
-        repeats1,
-        repeats2,
-        genome1,
-        genome2,
-        genes1,
-        genes2
-    )
+    //breakpoint_annotation = AnnotateBreakpointsWithRepeats(
+    //    syri_filtered,
+    //    repeats1,
+    //    repeats2,
+    //    genome1,
+    //    genome2,
+    //    genes1,
+    //    genes2
+    //)
 
-    PrepareIGVSessions(
-        breakpoint_annotation,
-        genes1,
-        genes2,
-        repeats1,
-        repeats2,
-        genome1,
-        genome2
-    )
+    //PrepareIGVSessions(
+    //    breakpoint_annotation,
+    //    genes1,
+    //    genes2,
+    //    repeats1,
+    //    repeats2,
+    //    genome1,
+    //    genome2
+    //)
 
-    Visualize(
-        breakpoint_annotation,
-        genome1,
-        genome2,
-        repeats1,
-        repeats2,
-        genes1,
-        genes2,
-        config
-    )
+    //Visualize(
+    //    breakpoint_annotation,
+    //    genome1,
+    //    genome2,
+    //    repeats1,
+    //    repeats2,
+    //    genes1,
+    //    genes2,
+    //    config
+    //)
 
-    SpectralTADAnalysis(hic_file)
+    //SpectralTADAnalysis(hic_file)
+
+    //centromeres = RunRepeatOBserver(genome1)
+    //centromeres = RunRepeatOBserver(genome2)
+    centromeres = RunRepeatOBserver(genome3)
 }
