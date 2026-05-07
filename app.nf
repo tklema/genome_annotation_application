@@ -14,25 +14,6 @@ params.repeats1 = ""
 params.repeats2 = ""
 params.mapped_svs = ""
 
-process Repeater2 {
-    input:
-    path genome
-
-    output:
-    path "repeats1.bed"
-
-    script:
-    """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
-    conda activate nextflow_env
-
-    > repeats1.bed
-
-    java -jar -Xms16g -Xmx64g ${projectDir}/../repeater2/dist/Repeater2.jar \\
-        ${genome} kmer=20 sln=200 quick=false
-    """
-}
-
 process Repeater2Genome1 {
     input:
     path genome
@@ -42,10 +23,10 @@ process Repeater2Genome1 {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate nextflow_env
 
-    java -jar -Xms16g -Xmx64g ${projectDir}/../repeater2/dist/Repeater2.jar \\
+    java -jar -Xms16g -Xmx64g /tools/Repeater2.jar \\
         ${genome} kmer=20 sln=200 -seqshow
 
     cat *.gff | \\
@@ -65,10 +46,10 @@ process Repeater2Genome2 {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate nextflow_env
 
-    java -jar -Xms16g -Xmx64g ${projectDir}/../repeater2/dist/Repeater2.jar \\
+    java -jar -Xms16g -Xmx64g /tools/Repeater2.jar \\
         ${genome} kmer=20 sln=200 -seqshow
 
     cat *.gff | \\
@@ -90,10 +71,10 @@ process ExtractGenes {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
-    python ${projectDir}/extract_genes.py \\
+    conda run -n syri python ${projectDir}/extract_genes.py \\
         --genes1 ${genes1} \\
         --genes2 ${genes2}
     """
@@ -112,7 +93,7 @@ process CreateSyntheticGenomes {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
     > new_genome1.fa
@@ -170,7 +151,7 @@ process SyRI {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
     mkdir -p alignments
@@ -194,7 +175,7 @@ process MappingSyriResults {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
     python3 ${projectDir}/mapping_syri_results.py ${syri} ${chromosome_mapping} ${genome1} ${genome1}
@@ -211,8 +192,8 @@ process EagleC {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
-    conda activate EagleC2
+    # source /opt/conda/etc/profile.d/conda.sh
+    # conda activate eaglec
 
     echo ${projectDir}
 
@@ -255,11 +236,11 @@ process EagleC {
     echo "Inter extend sizes: \$INTER_EX"
 
     mkdir -p eaglec_results
-    predictSV --mcool ${hic} \\
+    predictSV --cpu --mcool ${hic} \\
       --resolutions "\$RES_LIST" \\
       --intra-extend-size "\$INTRA_EX" \\
       --inter-extend-size "\$INTER_EX" \\
-      --model-path ${projectDir}/../EagleC2-models \\
+      --model-path /tools/EagleC2-models \\
       -g other \\
       -C \$CHROMOSOMES \\
       -p 16 --prob-cutoff-1 0.05 \\
@@ -279,7 +260,7 @@ process RunComparison {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate python_sv
 
     echo "SyRI file: $syri"
@@ -306,9 +287,9 @@ process AnnotateBreakpointsWithRepeats {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
-    
+
     python ${projectDir}/annotate_breakpoints.py \
         --syri ${syri_mapped} \
         --repeats1 ${repeats1} \
@@ -336,7 +317,7 @@ process PrepareIGVSessions {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
     # Создаем индексы для FASTA
@@ -349,7 +330,7 @@ process PrepareIGVSessions {
     # Сессия для genome1
     cat > session_genome1.xml << EOF
     <?xml version="1.0" encoding="UTF-8"?>
-    <Session genome="${genome1_fa}" locus="Chr1:1-1000000" version="8">
+    <Session genome="${genome1_fa}" version="8">
         <Resources>
             <Resource path="./${genome1_fa}"/>
             <Resource path="./${genes1}"/>
@@ -362,7 +343,7 @@ process PrepareIGVSessions {
     # Сессия для genome2
     cat > session_genome2.xml << EOF
     <?xml version="1.0" encoding="UTF-8"?>
-    <Session genome="${genome2_fa}" locus="CP056056.1:1-1000000" version="8">
+    <Session genome="${genome2_fa}" version="8">
         <Resources>
             <Resource path="./${genome2_fa}"/>
             <Resource path="./${genes2}"/>
@@ -375,6 +356,7 @@ process PrepareIGVSessions {
 }
 
 process Visualize {
+    conda "python_sv"
     input:
     path structural_variants
     path genome1
@@ -390,7 +372,7 @@ process Visualize {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
+    source /opt/conda/etc/profile.d/conda.sh
     conda activate python_sv
 
     mkdir visualizer
@@ -417,36 +399,36 @@ process SpectralTADAnalysis {
     path "spectraltad_results"
 
     shell:
-    '''
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
-    conda activate EagleC2
+    """
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate spectraltad
 
     mkdir -p spectraltad_results
 
-    RES_LIST=$(cooler ls !{hic} | grep -oP '\\d+' | sort -n)
-    echo "Resolutions: $RES_LIST"
+    RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{print \$NF}' | tr '\n' ' ')
+    echo "Resolutions: \$RES_LIST"
 
     BEST_RES=0
-    for res in $RES_LIST; do
-        if [ $res -le 200000 ]; then
-            if [ $res -ge 100000 ]; then
-                if [ $((100000 - BEST_RES)) -gt $((res - 100000)) ]; then
-                    BEST_RES=$res
+    for res in \$RES_LIST; do
+        if [ \$res -le 200000 ]; then
+            if [ \$res -ge 100000 ]; then
+                if [ \$((100000 - BEST_RES)) -gt \$((res - 100000)) ]; then
+                    BEST_RES=\$res
                 fi
                 break
             fi
-            BEST_RES=$res
+            BEST_RES=\$res
         fi
     done
 
-    echo "BEST_RES: $BEST_RES"
+    echo "BEST_RES: \$BEST_RES"
 
-    cooler dump --join !{hic}::/resolutions/$BEST_RES > spectraltad_matrix.txt
+    cooler dump --join ${hic}::/resolutions/\$BEST_RES > spectraltad_matrix.txt
 
-    Rscript !{projectDir}/spectraltad.R \\
+    Rscript ${projectDir}/spectraltad.R \\
         --matrix spectraltad_matrix.txt \\
         --output spectraltad_results/
-    '''
+    """
 }
 
 process RunRepeatOBserver {
@@ -458,8 +440,8 @@ process RunRepeatOBserver {
 
     script:
     """
-    source /nfs/home/tklimentiev/miniconda3/etc/profile.d/conda.sh
-    conda activate EagleC2
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate repeatobserver
 
     bash ${projectDir}/Setup_Run_Repeats.sh \\
         -i SpeciesName \\
@@ -473,6 +455,52 @@ process RunRepeatOBserver {
     """
 }
 
+process Compartments {
+    input:
+    path hic
+    path genes
+    path genome
+
+    output:
+    path "compartments_tandem_genes.txt"
+
+    script:
+    """
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate hicsca
+
+    /tools/trf-mod ${genome} > tandem_repeats.bed
+
+    RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{print \$NF}' | tr '\n' ' ')
+    BEST_RES=0
+    for res in \$RES_LIST; do
+        if [ \$res -le 200000 ]; then
+            if [ \$res -ge 100000 ]; then
+                if [ \$((100000 - BEST_RES)) -gt \$((res - 100000)) ]; then
+                    BEST_RES=\$res
+                fi
+                break
+            fi
+            BEST_RES=\$res
+        fi
+    done
+
+    echo "Using resolution: \$BEST_RES"
+
+    FIRST_RES=\$(echo \$RES_LIST | awk '{print \$1}')
+    CHROMOSOMES=\$(cooler dump -t chroms "${hic}::/resolutions/\$FIRST_RES" | awk '\$2 >= 2000000 {printf "%s ", \$1}' | sed 's/ \$//')
+
+    hictk convert ${hic} hic.hic -r \$BEST_RES
+
+    hic-sca -f hic.hic -r \$BEST_RES -p hicsca_compartments -o compartmets_results -c \$CHROMOSOMES --bed
+    tail -n +2 compartmets_results/hicsca_compartments_\${BEST_RES}bp.bed > compartments.bed
+
+    awk '{print \$1, \$2, \$3, \$4}' OFS='\\t' compartments.bed > compartments_raw.bed
+    bedtools coverage -a compartments_raw.bed -b tandem_repeats.bed | awk '{print \$1, \$2, \$3, \$4, \$8*100}' OFS='\\t' > compartments_tandems.txt
+    bedtools coverage -a compartments_tandems.txt -b ${genes} | awk '{print \$1, \$2, \$3, \$4, \$5, \$9*100}' OFS='\\t' > compartments_tandem_genes.txt
+    """
+}
+
 workflow {
     genome1 = file(params.genome1)
     genome2 = file(params.genome2)
@@ -480,65 +508,66 @@ workflow {
     config = file(params.config)
     hic_file = file(params.hic)
 
-    //repeats = Repeater2(genome1)
+    repeats1 = Repeater2Genome1(genome1)
+    repeats2 = Repeater2Genome2(genome2)
+    //repeats1 = file(params.repeats1)
+    //repeats2 = file(params.repeats2)
 
-    //repeats1 = Repeater2Genome1(genome1)
-    //repeats2 = Repeater2Genome2(genome2)
-    repeats1 = file(params.repeats1)
-    repeats2 = file(params.repeats2)
+    synthetic_genomes = CreateSyntheticGenomes(genome1, genome2, config)
+    syri_out = SyRI(synthetic_genomes[0], synthetic_genomes[1])
 
-    //synthetic_genomes = CreateSyntheticGenomes(genome1, genome2, config)
-    //syri_out = SyRI(synthetic_genomes[0], synthetic_genomes[1])
-
-    //syri_mapped = MappingSyriResults(syri_out, synthetic_genomes[2], genome1, genome2)
+    syri_mapped = MappingSyriResults(syri_out, synthetic_genomes[2], genome1, genome2)
     //syri_mapped = file(params.mapped_svs)
 
-    //eaglec = EagleC(hic_file, genome1)
+    eaglec = EagleC(hic_file, genome1)
     //eaglec = file(params.eaglec)
 
-    //comparison = RunComparison(syri_mapped, eaglec)
-    //syri_filtered = comparison[0]
+    comparison = RunComparison(syri_mapped, eaglec)
+    syri_filtered = comparison[0]
     //syri_filtered = file(params.syri_filtered)
     //syri_filtered = file(params.mapped_svs)
 
-    //genes = ExtractGenes(file(params.genes1), file(params.genes2))
-    //genes1 = genes[0]
-    //genes2 = genes[1]
+    genes = ExtractGenes(file(params.genes1), file(params.genes2))
+    genes1 = genes[0]
+    genes2 = genes[1]
 
-    //breakpoint_annotation = AnnotateBreakpointsWithRepeats(
-    //    syri_filtered,
-    //    repeats1,
-    //    repeats2,
-    //    genome1,
-    //    genome2,
-    //    genes1,
-    //    genes2
-    //)
+    breakpoint_annotation = AnnotateBreakpointsWithRepeats(
+        syri_filtered,
+        repeats1,
+        repeats2,
+        genome1,
+        genome2,
+        genes1,
+        genes2
+    )
 
-    //PrepareIGVSessions(
-    //    breakpoint_annotation,
-    //    genes1,
-    //    genes2,
-    //    repeats1,
-    //    repeats2,
-    //    genome1,
-    //    genome2
-    //)
+    PrepareIGVSessions(
+        breakpoint_annotation,
+        genes1,
+        genes2,
+        repeats1,
+        repeats2,
+        genome1,
+        genome2
+    )
 
-    //Visualize(
-    //    breakpoint_annotation,
-    //    genome1,
-    //    genome2,
-    //    repeats1,
-    //    repeats2,
-    //    genes1,
-    //    genes2,
-    //    config
-    //)
+    Visualize(
+        breakpoint_annotation,
+        genome1,
+        genome2,
+        repeats1,
+        repeats2,
+        genes1,
+        genes2,
+        config
+    )
 
-    //SpectralTADAnalysis(hic_file)
+    SpectralTADAnalysis(hic_file)
 
-    //centromeres = RunRepeatOBserver(genome1)
+    centromeres = RunRepeatOBserver(genome1)
     //centromeres = RunRepeatOBserver(genome2)
-    centromeres = RunRepeatOBserver(genome3)
+    //centromeres = RunRepeatOBserver(genome3)
+
+    Compartments(hic_file, genes1, genome1)    
 }
+
