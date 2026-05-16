@@ -3,7 +3,8 @@ nextflow.enable.dsl = 2
 params.genome1 = ""
 params.genome2 = ""
 params.config = ""
-params.hic = ""
+params.mcool_intragenomic = ""
+params.mcool_intergenomic = ""
 params.genes1 = ""
 params.genes2 = ""
 
@@ -60,13 +61,30 @@ process Repeater2Genome2 {
     """
 }
 
-process ExtractGenes {
+process ExtractGenes1 {
     input:
-    path genes1
-    path genes2
+    path extract_genes_script
+    path genes
 
     output:
     path "genes1.bed"
+
+    script:
+    """
+    source /opt/conda/etc/profile.d/conda.sh
+    conda activate syri
+
+    python ${extract_genes_script} --genes ${genes}
+    cp genes.bed genes1.bed
+    """
+}
+
+process ExtractGenes2 {
+    input:
+    path extract_genes_script
+    path genes
+
+    output:
     path "genes2.bed"
 
     script:
@@ -74,9 +92,8 @@ process ExtractGenes {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
-    conda run -n syri python ${projectDir}/extract_genes.py \\
-        --genes1 ${genes1} \\
-        --genes2 ${genes2}
+    python ${extract_genes_script} --genes ${genes}
+    cp genes.bed genes2.bed
     """
 }
 
@@ -108,13 +125,13 @@ process CreateSyntheticGenomes {
         [[ -z "\$line" ]] && continue
         [[ "\$line" =~ ^# ]] && continue
 
-        source_chromosomes="\${line%:*}"
-        target_genomes="\${line#*:}"
+        ref_chromosomes="\${line%:*}"
+        qry_chromosomes="\${line#*:}"
 
         echo ">chrom\${chrom_num}" >> new_genome1.fa
         genome1_lengths=""
         genome1_total=0
-        for chr in \$(echo "\$source_chromosomes" | tr ',' ' '); do
+        for chr in \$(echo "\$ref_chromosomes" | tr ',' ' '); do
             awk -v target="\$chr" '\$1 == ">"target {flag=1; next} /^>/{flag=0} flag{print}' ${genome1} >> new_genome1.fa
             chr_length=\$(seqkit fx2tab -n -l ${genome1} | awk -v target="\$chr" '\$1 == target {print \$NF}')
             genome1_lengths="\$genome1_lengths,\$chr_length"
@@ -125,7 +142,7 @@ process CreateSyntheticGenomes {
         echo ">chrom\${chrom_num}" >> new_genome2.fa
         genome2_lengths=""
         genome2_total=0
-        for chr in \$(echo "\$target_genomes" | tr ',' ' '); do
+        for chr in \$(echo "\$qry_chromosomes" | tr ',' ' '); do
             awk -v target="\$chr" '\$1 == ">"target {flag=1; next} /^>/{flag=0} flag{print}' ${genome2} >> new_genome2.fa
             chr_length=\$(seqkit fx2tab -n -l ${genome2} | awk -v target="\$chr" '\$1 == target {print \$NF}')
             genome2_lengths="\$genome2_lengths,\$chr_length"
@@ -134,7 +151,7 @@ process CreateSyntheticGenomes {
         genome2_lengths="\${genome2_lengths:1}"
 
         # Write mapping info
-        echo "chrom\$chrom_num\t\$source_chromosomes\t\$target_genomes\t\$genome1_lengths\t\$genome2_lengths" >> chromosome_mapping.tsv
+        echo "chrom\$chrom_num\t\$ref_chromosomes\t\$qry_chromosomes\t\$genome1_lengths\t\$genome2_lengths" >> chromosome_mapping.tsv
 
         ((chrom_num++))
     done < ${config}
@@ -165,6 +182,7 @@ process SyRI {
 
 process MappingSyriResults {
     input:
+    path mapping_syri_results_script
     path syri
     path chromosome_mapping
     path genome1
@@ -178,14 +196,13 @@ process MappingSyriResults {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
-    python3 ${projectDir}/mapping_syri_results.py ${syri} ${chromosome_mapping} ${genome1} ${genome1}
+    python3 ${mapping_syri_results_script} ${syri} ${chromosome_mapping} ${genome1} ${genome1}
     """
 }
 
 process EagleC {
     input:
     path hic
-    path genome
 
     output:
     path "eaglec_results/output.SV_calls.txt"
@@ -194,8 +211,6 @@ process EagleC {
     """
     # source /opt/conda/etc/profile.d/conda.sh
     # conda activate eaglec
-
-    echo ${projectDir}
 
     # Get resolutions and convert to comma-separated list
     RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{printf "%s,", \$NF}' | sed 's/,\$//')
@@ -236,7 +251,7 @@ process EagleC {
     echo "Inter extend sizes: \$INTER_EX"
 
     mkdir -p eaglec_results
-    predictSV --cpu --mcool ${hic} \\
+    predictSV --mcool ${hic} \\
       --resolutions "\$RES_LIST" \\
       --intra-extend-size "\$INTRA_EX" \\
       --inter-extend-size "\$INTER_EX" \\
@@ -250,6 +265,7 @@ process EagleC {
 
 process RunComparison {
     input:
+    path compare_script
     path syri
     path eaglec2
 
@@ -263,17 +279,15 @@ process RunComparison {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate python_sv
 
-    echo "SyRI file: $syri"
-    echo "EagleC2 file: $eaglec2"
-
-    python ${projectDir}/compare_syri_eaglec2.py \
-        --syri "$syri" \
-        --eaglec2 "$eaglec2" > comparison_stats.txt
+    python ${compare_script} \
+        --syri ${syri} \
+        --eaglec2 ${eaglec2} > comparison_stats.txt
     """
 }
 
 process AnnotateBreakpointsWithRepeats {
     input:
+    path annotate_breakpoints_script
     path syri_mapped
     path repeats1
     path repeats2
@@ -290,7 +304,7 @@ process AnnotateBreakpointsWithRepeats {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
-    python ${projectDir}/annotate_breakpoints.py \
+    python ${annotate_breakpoints_script} \
         --syri ${syri_mapped} \
         --repeats1 ${repeats1} \
         --repeats2 ${repeats2} \
@@ -301,6 +315,7 @@ process AnnotateBreakpointsWithRepeats {
 
 process PrepareIGVSessions {
     input:
+    path split_breakpoints_script
     path breakpoints_tsv
     path genes1
     path genes2
@@ -308,6 +323,7 @@ process PrepareIGVSessions {
     path repeats2
     path genome1_fa
     path genome2_fa
+    path tad
 
     output:
     path "session_genome1.xml"
@@ -325,7 +341,7 @@ process PrepareIGVSessions {
     samtools faidx ${genome2_fa}
 
     # Разделяем брейкпоинты по геномам
-    python ${projectDir}/split_breakpoints.py ${breakpoints_tsv}
+    python ${split_breakpoints_script} ${breakpoints_tsv}
 
     # Сессия для genome1
     cat > session_genome1.xml << EOF
@@ -335,6 +351,7 @@ process PrepareIGVSessions {
             <Resource path="./${genome1_fa}"/>
             <Resource path="./${genes1}"/>
             <Resource path="./${repeats1}"/>
+            <Resource path="./${tad}"/>
             <Resource path="./breakpoints_genome1.bed"/>
         </Resources>
     </Session>
@@ -356,8 +373,8 @@ process PrepareIGVSessions {
 }
 
 process Visualize {
-    conda "python_sv"
     input:
+    path visualizer_script
     path structural_variants
     path genome1
     path genome2
@@ -380,7 +397,7 @@ process Visualize {
     echo -e "${genome1}\tgenome1" > genomes.txt
     echo -e "${genome2}\tgenome2" >> genomes.txt
 
-    python ${projectDir}/visualizer.py \
+    python ${visualizer_script} \
         --sr ${structural_variants} \
         --genomes genomes.txt \
         --ref-repeats ${repeats1} \
@@ -393,10 +410,11 @@ process Visualize {
 
 process SpectralTADAnalysis {
     input:
+    path spectraltad_script
     path hic
 
     output:
-    path "spectraltad_results"
+    path "all_tads.bed"
 
     shell:
     """
@@ -425,14 +443,18 @@ process SpectralTADAnalysis {
 
     cooler dump --join ${hic}::/resolutions/\$BEST_RES > spectraltad_matrix.txt
 
-    Rscript ${projectDir}/spectraltad.R \\
+    Rscript ${spectraltad_script} \\
         --matrix spectraltad_matrix.txt \\
         --output spectraltad_results/
+
+    echo -e "chr\tstart\tend\tlevel" > all_tads.bed 
+    tail -n +2 -q spectraltad_results/*.bed >> all_tads.bed
     """
 }
 
 process RunRepeatOBserver {
     input:
+    path repeatobserver_script
     path genome
 
     output:
@@ -443,7 +465,7 @@ process RunRepeatOBserver {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate repeatobserver
 
-    bash ${projectDir}/Setup_Run_Repeats.sh \\
+    bash ${repeatobserver_script} \\
         -i SpeciesName \\
         -f ${genome} \\
         -h H0 \\
@@ -497,77 +519,63 @@ process Compartments {
 
     awk '{print \$1, \$2, \$3, \$4}' OFS='\\t' compartments.bed > compartments_raw.bed
     bedtools coverage -a compartments_raw.bed -b tandem_repeats.bed | awk '{print \$1, \$2, \$3, \$4, \$8*100}' OFS='\\t' > compartments_tandems.txt
-    bedtools coverage -a compartments_tandems.txt -b ${genes} | awk '{print \$1, \$2, \$3, \$4, \$5, \$9*100}' OFS='\\t' > compartments_tandem_genes.txt
+    bedtools coverage -a compartments_tandems.txt -b ${genes} | awk '{print \$1, \$2, \$3, \$4, \$5, \$6, \$9*100}' OFS='\\t' > compartments_tandem_genes.txt
     """
 }
 
 workflow {
-    genome1 = file(params.genome1)
-    genome2 = file(params.genome2)
-    genome3 = file(params.genome3)
-    config = file(params.config)
-    hic_file = file(params.hic)
+    genome1 = params.genome1 ? file(params.genome1) : null
+    genome2 = params.genome2 ? file(params.genome2) : null
+    //genome3 = file(params.genome3)
+    config = params.config ? file(params.config) : null
+    mcool_intragenomic = params.mcool_intragenomic ? file(params.mcool_intragenomic) : null
+    mcool_intergenomic = params.mcool_intergenomic ? file(params.mcool_intergenomic) : null
+    genes1_file = params.genes1 ? file(params.genes1) : null
+    genes2_file = params.genes2 ? file(params.genes2) : null
 
-    repeats1 = Repeater2Genome1(genome1)
-    repeats2 = Repeater2Genome2(genome2)
+    compare_script = file("${projectDir}/compare_syri_eaglec2.py")
+    extract_genes_script = file("${projectDir}/extract_genes.py")
+    mapping_syri_results_script = file("${projectDir}/mapping_syri_results.py")
+    annotate_breakpoints_script = file("${projectDir}/annotate_breakpoints.py")
+    split_breakpoints_script = file("${projectDir}/split_breakpoints.py")
+    visualizer_script = file("${projectDir}/visualizer.py")
+    spectraltad_script = file("${projectDir}/spectraltad.R")
+    repeatobserver_script = file("${projectDir}/Setup_Run_Repeats.sh") // to docker
+
+    repeats1 = genome1 ? Repeater2Genome1(genome1) : null
+    repeats2 = genome2 ? Repeater2Genome2(genome2) : null
     //repeats1 = file(params.repeats1)
     //repeats2 = file(params.repeats2)
 
-    synthetic_genomes = CreateSyntheticGenomes(genome1, genome2, config)
-    syri_out = SyRI(synthetic_genomes[0], synthetic_genomes[1])
+    synthetic_genomes = (genome1 && genome2 && config) ? CreateSyntheticGenomes(genome1, genome2, config) : null
+    syri_out = synthetic_genomes ? SyRI(synthetic_genomes[0], synthetic_genomes[1]) : null
 
-    syri_mapped = MappingSyriResults(syri_out, synthetic_genomes[2], genome1, genome2)
+    syri_mapped = (syri_out && synthetic_genomes && genome1 && genome2) ? MappingSyriResults(mapping_syri_results_script, syri_out, synthetic_genomes[2], genome1, genome2) : null
     //syri_mapped = file(params.mapped_svs)
 
-    eaglec = EagleC(hic_file, genome1)
+    eaglec = mcool_intergenomic ? EagleC(mcool_intergenomic) : null
     //eaglec = file(params.eaglec)
 
-    comparison = RunComparison(syri_mapped, eaglec)
-    syri_filtered = comparison[0]
+    comparison = (syri_mapped && eaglec) ? RunComparison(compare_script, syri_mapped, eaglec) : null
+    syri_filtered = comparison ? comparison[0] : (syri_mapped ? syri_mapped : null)
     //syri_filtered = file(params.syri_filtered)
     //syri_filtered = file(params.mapped_svs)
 
-    genes = ExtractGenes(file(params.genes1), file(params.genes2))
-    genes1 = genes[0]
-    genes2 = genes[1]
+    genes1 = genes1_file ? ExtractGenes1(extract_genes_script, genes1_file) : null
+    genes2 = genes2_file ? ExtractGenes2(extract_genes_script, genes2_file) : null
 
-    breakpoint_annotation = AnnotateBreakpointsWithRepeats(
-        syri_filtered,
-        repeats1,
-        repeats2,
-        genome1,
-        genome2,
-        genes1,
-        genes2
-    )
+    breakpoint_annotation = (syri_filtered && repeats1 && repeats2 && genome1 && genome2 && genes1 && genes2) ? AnnotateBreakpointsWithRepeats(annotate_breakpoints_script, syri_filtered, repeats1, repeats2, genome1, genome2, genes1, genes2) : null
 
-    PrepareIGVSessions(
-        breakpoint_annotation,
-        genes1,
-        genes2,
-        repeats1,
-        repeats2,
-        genome1,
-        genome2
-    )
+    tad = mcool_intragenomic ? SpectralTADAnalysis(spectraltad_script, mcool_intragenomic) : null
 
-    Visualize(
-        breakpoint_annotation,
-        genome1,
-        genome2,
-        repeats1,
-        repeats2,
-        genes1,
-        genes2,
-        config
-    )
+    igv = (breakpoint_annotation && genes1 && genes2 && repeats1 && repeats2 && genome1 && genome2 && tad) ? PrepareIGVSessions(split_breakpoints_script, breakpoint_annotation, genes1, genes2, repeats1, repeats2, genome1, genome2, tad) : null
 
-    SpectralTADAnalysis(hic_file)
+    visualize = (breakpoint_annotation && genome1 && genome2 && repeats1 && repeats2 && genes1 && genes2 && config) ? Visualize(visualizer_script, breakpoint_annotation, genome1, genome2, repeats1, repeats2, genes1, genes2, config) : null
 
-    centromeres = RunRepeatOBserver(genome1)
+    centromeres = genome1 ? RunRepeatOBserver(repeatobserver_script, genome1) : null
     //centromeres = RunRepeatOBserver(genome2)
     //centromeres = RunRepeatOBserver(genome3)
 
-    Compartments(hic_file, genes1, genome1)    
+    compartments = (mcool_intragenomic && genes1 && genome1) ? Compartments(mcool_intragenomic, genes1, genome1) : null
 }
 

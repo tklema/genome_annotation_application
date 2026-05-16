@@ -37,15 +37,12 @@ def load_genes(gene_file):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--genes1', required=True)
-    parser.add_argument('--genes2', required=True)
+    parser.add_argument('--genes', required=True)
     args = parser.parse_args()
 
-    genes1 = load_genes(args.genes1)
-    genes2 = load_genes(args.genes2)
+    genes = load_genes(args.genes)
 
-    genes1.to_csv("genes1.bed", sep='\t', header=False, index=False)
-    genes2.to_csv("genes2.bed", sep='\t', header=False, index=False)
+    genes.to_csv("genes.bed", sep='\t', header=False, index=False)
 
 if __name__ == "__main__":
     main()

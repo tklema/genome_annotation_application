@@ -164,7 +164,7 @@ def process_sv_pair(chrom, pos1, pos2, genes_tree, repeats_tree, window_size, nu
         results[f'{suffix}_window_end'] = win_end
         results[f'{suffix}_coverage'] = cov
         results[f'{suffix}_percentile'] = percentile
-        results[f'{suffix}_significant'] = percentile > 95 or percentile < 5
+        results[f'{suffix}_significant'] = percentile > 95
     
     return results
 
