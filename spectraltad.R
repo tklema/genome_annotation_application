@@ -1,4 +1,10 @@
 #!/usr/bin/env Rscript
+"""
+Call TAD boundaries using SpectralTAD from Hi-C contact matrices.
+
+Input: Sparse contact matrix (cooler format converted to table)
+Output: BED files with TAD boundaries for each chromosome and hierarchical level
+"""
 args <- commandArgs(trailingOnly = TRUE)
 matrix <- args[which(args == "--matrix") + 1]
 out_dir <- args[which(args == "--output") + 1]
@@ -9,15 +15,20 @@ if (!grepl("/$", out_dir)) {
 library(SpectralTAD)
 library(HiCcompare)
 
+# Load and convert contact matrix
 cool_mat <- read.table(matrix)
 sparse_mats = HiCcompare::cooler2sparse(cool_mat)
+
+# Run SpectralTAD for each chromosome with fallback levels
 spec_tads = lapply(names(sparse_mats), function(x) {
   tryCatch({
+    # First try with 3 hierarchical levels
     SpectralTAD(sparse_mats[[x]], chr = x, levels = 3)
   }, error = function(e) {
     message(paste("Error (levels=3) with chromosome", x, ":", e$message))
     message(paste("Trying levels=2 for", x))    
     tryCatch({
+      # Fallback to 2 levels if 3 fails
       SpectralTAD(sparse_mats[[x]], chr = x, levels = 2)
     }, error = function(e2) {
       message(paste("Failed even for levels 1-2 for", x, ":", e2$message))
@@ -25,6 +36,8 @@ spec_tads = lapply(names(sparse_mats), function(x) {
     })
   })
 })
+
+# Write results to BED files
 for(i in seq_along(spec_tads)) {
   if(!is.null(spec_tads[[i]])) {
     chr_name <- names(sparse_mats)[i]

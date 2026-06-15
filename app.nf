@@ -27,6 +27,7 @@ process Repeater2Genome1 {
     java -jar -Xms16g -Xmx64g /tools/Repeater2.jar \\
         ${genome} kmer=20 sln=200 -seqshow
 
+    # Convert all GFFs to BED: chrom, start-1, end, repeat_class
     cat *.gff | \\
         awk -F'\\t' '/^[^#]/ && \$4 ~ /^[0-9]+\$/ {
             split(\$1, a, " ")
@@ -35,6 +36,7 @@ process Repeater2Genome1 {
     """
 }
 
+// Same for genome2
 process Repeater2Genome2 {
     publishDir "${params.outdir}", mode: 'copy'
 
@@ -133,6 +135,7 @@ process CreateSyntheticGenomes {
         ref_chromosomes="\${line%:*}"
         qry_chromosomes="\${line#*:}"
 
+        # Build synthetic chromosome for genome1
         echo ">chrom\${chrom_num}" >> new_genome1.fa
         genome1_lengths=""
         genome1_total=0
@@ -144,6 +147,7 @@ process CreateSyntheticGenomes {
         done
         genome1_lengths="\${genome1_lengths:1}"
 
+        # Build synthetic chromosome for genome2
         echo ">chrom\${chrom_num}" >> new_genome2.fa
         genome2_lengths=""
         genome2_total=0
@@ -155,7 +159,7 @@ process CreateSyntheticGenomes {
         done
         genome2_lengths="\${genome2_lengths:1}"
 
-        # Write mapping info
+        # Store mapping for later coordinate back-conversion
         echo "chrom\$chrom_num\t\$ref_chromosomes\t\$qry_chromosomes\t\$genome1_lengths\t\$genome2_lengths" >> chromosome_mapping.tsv
 
         ((chrom_num++))
@@ -234,6 +238,7 @@ process EagleC {
     echo "Chromosomes: \$CHROMOSOMES"
 
     # Calculate intra and inter extend sizes based on resolutions
+    # Higher resolution = more confidence = larger extend size
     INTRA_EX=""
     INTER_EX=""
 
@@ -350,14 +355,14 @@ process PrepareIGVSessions {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate syri
 
-    # Создаем индексы для FASTA
+    # Create FASTA indices for IGV
     samtools faidx ${genome1_fa}
     samtools faidx ${genome2_fa}
 
-    # Разделяем брейкпоинты по геномам
+    # Split breakpoints by genome
     python ${split_breakpoints_script} ${breakpoints_tsv}
 
-    # Сессия для genome1
+    # IGV session for genome1
     cat > session_genome1.xml << EOF
     <?xml version="1.0" encoding="UTF-8"?>
     <Session genome="${genome1_fa}" version="8">
@@ -371,7 +376,7 @@ process PrepareIGVSessions {
     </Session>
     EOF
 
-    # Сессия для genome2
+    # IGV session for genome2
     cat > session_genome2.xml << EOF
     <?xml version="1.0" encoding="UTF-8"?>
     <Session genome="${genome2_fa}" version="8">
@@ -444,6 +449,7 @@ process SpectralTADAnalysis {
     RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{print \$NF}' | tr '\n' ' ')
     echo "Resolutions: \$RES_LIST"
 
+    # Pick best resolution: ≤200kb, closest to 50kb
     MAIN_RES=50000
     BEST_RES=0
     for res in \$RES_LIST; do
@@ -466,6 +472,7 @@ process SpectralTADAnalysis {
         --matrix spectraltad_matrix.txt \\
         --output spectraltad_results/
 
+    # Combine all chromosomes into single BED
     tail -n +2 -q spectraltad_results/*.bed >> all_tads.bed
     """
 }
@@ -495,8 +502,6 @@ process RunRepeatOBserver {
         -c 15 \\
         -m 100000 \\
         -g FALSE
-
-    cp output_chromosomes/SpeciesName_H0-AT/Summary_output/histograms/SpeciesName_H0-AT_Centromere_histograms_summary.txt .
     """
 }
 
@@ -516,8 +521,10 @@ process Compartments {
     source /opt/conda/etc/profile.d/conda.sh
     conda activate hicsca
 
+    # Detect tandem repeats
     /tools/trf-mod ${genome} > tandem_repeats.bed
 
+    # Find best resolution (≤200kb, closest to 100kb)
     RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{print \$NF}' | tr '\n' ' ')
     BEST_RES=0
     for res in \$RES_LIST; do
@@ -537,18 +544,24 @@ process Compartments {
     FIRST_RES=\$(echo \$RES_LIST | awk '{print \$1}')
     CHROMOSOMES=\$(cooler dump -t chroms "${hic}::/resolutions/\$FIRST_RES" | awk '\$2 >= 2000000 {printf "%s ", \$1}' | sed 's/ \$//')
 
+    # Convert cooler to .hic for hic-sca compatibility
     hictk convert ${hic} hic.hic -r \$BEST_RES
 
+    # Run compartment analysis
     hic-sca -f hic.hic -r \$BEST_RES -p hicsca_compartments -o compartmets_results -c \$CHROMOSOMES --bed
     tail -n +2 compartmets_results/hicsca_compartments_\${BEST_RES}bp.bed > compartments.bed
-
     awk '{print \$1, \$2, \$3, \$4}' OFS='\\t' compartments.bed > compartments_raw.bed
+
+    # Calculate tandem repeat density per compartment
     bedtools coverage -a compartments_raw.bed -b tandem_repeats.bed | awk '{print \$1, \$2, \$3, \$4, \$8*100}' OFS='\\t' > compartments_tandems.txt
+
+    # Calculate gene density per compartment
     bedtools coverage -a compartments_tandems.txt -b ${genes} | awk '{print \$1, \$2, \$3, \$4, \$5, \$6, \$9*100}' OFS='\\t' > compartments_tandem_genes.txt
     """
 }
 
 workflow {
+    // Input validation
     genome1 = params.genome1 ? file(params.genome1) : null
     genome2 = params.genome2 ? file(params.genome2) : null
     config = params.config ? file(params.config) : null
@@ -557,6 +570,7 @@ workflow {
     genes1_file = params.genes1 ? file(params.genes1) : null
     genes2_file = params.genes2 ? file(params.genes2) : null
 
+    // Scripts (must be in workflow directory)
     compare_script = file("${projectDir}/compare_syri_eaglec2.py")
     extract_genes_script = file("${projectDir}/extract_genes.py")
     mapping_syri_results_script = file("${projectDir}/mapping_syri_results.py")

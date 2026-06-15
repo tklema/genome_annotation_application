@@ -15,6 +15,7 @@ def main():
         'INV', 'TRANS', 'DUP', 'INVTR', 'INVDUP'
     }
 
+    # Load EagleC2 results
     eaglec_by_chrom = defaultdict(list)
     with open(args.eaglec2) as f:
         next(f)
@@ -26,6 +27,7 @@ def main():
             x, y = sorted([pos1, pos2])
             eaglec_by_chrom[chrom].append((x, y, eaglec_id))
 
+    # Load and compare SyRI results with EagleC2
     try:
         df_syri = pd.read_csv(args.syri, sep='\t')
         df_syri['confirmed_by_eaglec'] = False

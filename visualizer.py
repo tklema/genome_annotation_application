@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import os
 from collections import defaultdict
 from collections import deque
 from copy import deepcopy
@@ -14,8 +13,10 @@ from matplotlib.path import Path
 from matplotlib.pyplot import get_cmap
 from pandas import DataFrame
 
+# SV types to visualize
 VARS = ['INV', 'TRANS', 'INVTR', 'DUP', 'INVDP']
 
+# Layout constants (positioning on figure)
 TRACK_HEIGHT = 0.6
 TOP_TRACK_POS = 7.7
 TOP_CHR_POS = 6.7
@@ -26,6 +27,7 @@ CHR_LINE_HEIGHT = 0.1
 TRACK_LABEL_SPACE = 0.7
 TRACK_SPACING = 0.1
 
+# Styling
 FONT_SIZE = 6
 DPI = 300
 BBOX = [0, 1.01, 0.5, 0.3]
@@ -35,6 +37,7 @@ BBOX_ANNOTATIONS = [BBOX[0] + BBOXMAR, BBOX[1], BBOX[2], BBOX[3]]
 BBOX_TRACKS = [BBOX[0] + 2*BBOXMAR, BBOX[1], BBOX[2], BBOX[3]]
 BBOX_WINDOW = [BBOX[0] + 3*BBOXMAR, 0.905]
 
+# Color scheme
 COLOR_INVERSION = '#FFA500'
 COLOR_TRANSLOCATION = '#9ACD32'
 COLOR_DUPLICATION = '#00BBFF'
@@ -47,6 +50,7 @@ REFERENCE_GENOME_COLOR = matplotlib.colors.to_hex(get_cmap('tab10')(0))
 QUERY_GENOME_COLOR = matplotlib.colors.to_hex(get_cmap('tab10')(1))
 
 def merge_ranges(ranges):
+    """Merge overlapping intervals and return sorted non-overlapping ranges."""
     if len(ranges) < 2:
         return ranges
     for i in ranges:
@@ -67,6 +71,7 @@ def merge_ranges(ranges):
     return np.array(out_range)
 
 def read_fasta(file_path):
+    """Load genome fasta, returns dict {chrom: sequence}."""
     out = {}
     current_chrom = ''
     current_seq = deque()
@@ -85,6 +90,10 @@ def read_fasta(file_path):
     return out
 
 def read_sv_tsv(file_path):
+    """
+    Load SV data from TSV with columns: ref_chrom, ref_start, ref_end,
+    qry_chrom, qry_start, qry_end, type, ancestral_start, ancestral_end.
+    """
     sv_data = []
     with open(file_path, 'r') as fin:
         header = fin.readline().strip().split('\t')
@@ -114,6 +123,7 @@ def read_sv_tsv(file_path):
     return df
 
 class BaseTrack:
+    """Base class for genomic data tracks (repeats, genes)."""
     def __init__(self, file_path, genome_name, track_name):
         self.file_path = file_path
         self.name = track_name
@@ -132,6 +142,7 @@ class BaseTrack:
         raise NotImplementedError
 
 class RepeatTrack(BaseTrack):
+    """Repeat density track. Bins repeats and computes coverage per window."""
     def __init__(self, file_path, genome_name, bin_width=100000):
         super().__init__(file_path, genome_name, "repeats")
         self.line_color = COLOR_REPEAT_LINE
@@ -183,12 +194,13 @@ class RepeatTrack(BaseTrack):
     def _process_chromosome(self, chromosome_lengths, genome_idx, bin_width,
                             bin_counts, added_chroms,
                             chrom, positions):
+        """Bin repeat positions into density values for one chromosome."""
         ranges = merge_ranges(np.array(positions))
         all_positions = np.array(list(set(
             i for rng in ranges for i in range(rng[0], rng[1])
         )))
 
-        step = bin_width // 2
+        step = bin_width // 2  # 50% overlap between bins
         bins = np.arange(
             0, chromosome_lengths[genome_idx][1][chrom] + bin_width, step
         )
@@ -201,7 +213,7 @@ class RepeatTrack(BaseTrack):
         added_chroms.append(chrom)
 
 class GeneTrack(BaseTrack):
-
+    """Gene track. Simply draws rectangles for gene bodies."""
     def __init__(self, file_path, genome_name):
         super().__init__(file_path, genome_name, "genes")
         self.line_color = COLOR_GENE_LINE
@@ -230,7 +242,7 @@ class GeneTrack(BaseTrack):
         self.bin_counts = bin_counts
 
 class Genome:
-
+    """Represents a genome with its fasta and chromosome lengths."""
     def __init__(self, file_path, name, color):
         self.file_path = file_path
         self.name = name
@@ -243,7 +255,7 @@ class Genome:
         self.lengths = {chrom: len(seq) for chrom, seq in sequences.items()}
 
 class CompositeCoordinateSystem:
-
+    """Maps multiple chromosomes into a single coordinate system."""
     def __init__(self, ref_chromosomes, query_chromosomes, chromosome_lengths):
         self.ref_chromosomes = ref_chromosomes
         self.query_chromosomes = query_chromosomes
@@ -274,6 +286,7 @@ class CompositeCoordinateSystem:
         return self.query_offsets.get(chrom, 0) + position
 
 def load_tracks(args, chromosome_lengths):
+    """Load all requested track files (repeats/genes for ref/query)."""
     tracks = []
 
     if args.ref_repeats:
@@ -299,6 +312,7 @@ def load_tracks(args, chromosome_lengths):
     return tracks
 
 def validate_alignment_to_fasta(alignments, genomes_file):
+    """Load genomes and filter chromosomes to those present in alignments."""
     output = deque()
     genomes = deque()
     with open(genomes_file, 'r') as fin:
@@ -321,6 +335,7 @@ def validate_alignment_to_fasta(alignments, genomes_file):
     return output, genomes
 
 def filter_input_data(df):
+    """Keep only SVs >= 10kb and sort by coordinates."""
     df = df.loc[((df['ref_end'] - df['ref_start']) >= 10000) |
                 ((df['qry_end'] - df['qry_start']) >= 10000)].copy()
     df.sort_values(['qry_chrom', 'qry_start', 'qry_end'], inplace=True)
@@ -328,6 +343,7 @@ def filter_input_data(df):
     return df
 
 def fix_inversion_coordinates(df):
+    """Inversions in SYRI have swapped coordinates. Fix by swapping start/end."""
     inversion_mask = ['INV' in typ for typ in df['type']]
 
     df.loc[inversion_mask, 'qry_start'] = df.loc[inversion_mask, 'qry_start'] + df.loc[inversion_mask, 'qry_end']
@@ -337,6 +353,7 @@ def fix_inversion_coordinates(df):
     return df
 
 def draw_axes(ax, composite):
+    """Configure plot axes: limits, grid, x-axis scaling."""
     bottom_limit = BOTTOM_TRACK_POS - TRACK_HEIGHT - 0.5
     upper_limit = TOP_TRACK_POS + TRACK_HEIGHT + 0.5
 
@@ -348,6 +365,7 @@ def draw_axes(ax, composite):
     ax.ticklabel_format(axis='x', useOffset=False, style='plain')
     ax.set_axisbelow(True)
 
+    # Auto-scale x-axis labels (bp -> Kbp/Mbp/Gbp)
     xticks = ax.get_xticks()
     if composite.max_length >= 1_000_000_000:
         scale_factor = 1_000_000_000
@@ -371,8 +389,10 @@ def draw_axes(ax, composite):
 
 
 def draw_chromosomes(ax, composite, genomes, chromosome_lengths):
+    """Draw chromosome lines for both genomes with labels."""
     chromosome_lines = []
 
+    # Reference genome (top)
     ref_genome = genomes[0]
     for i, ref_chrom in enumerate(composite.ref_chromosomes):
         y_pos = TOP_CHR_POS
@@ -392,6 +412,7 @@ def draw_chromosomes(ax, composite, genomes, chromosome_lengths):
         ax.text(start + 0.01 * chromosome_lengths[0][1][ref_chrom], y_pos + 0.02,
                 ref_chrom, fontsize=6, ha='left', va='bottom')
 
+    # Query genome (bottom)
     query_genome = genomes[1]
     for i, qry_chrom in enumerate(composite.query_chromosomes):
         y_pos = BOTTOM_CHR_POS
@@ -416,6 +437,7 @@ def draw_chromosomes(ax, composite, genomes, chromosome_lengths):
 
 
 def get_enriched_vertices(point0, point1, point2, point3):
+    """Calculate Bezier control points for highlighting enriched breakpoints."""
     x0, y0 = point0
     x1, y1 = point1
     x2, y2 = point2
@@ -432,10 +454,17 @@ def create_bezier_patch(ref_start, ref_end, qry_start, qry_end,
                         ref_y, qry_y, color, alpha,
                         ancestral_start, ancestral_end,
                         label='', line_width=0, zorder=0):
+    """
+    Create a Bézier curve patch connecting SV coordinates between genomes.
+
+    Returns list of patches: main paint + optional enriched boundary highlights
+    for breakpoints where ancestral state was determined.
+    """
     start_mid = (qry_start - ref_start) / 2
     end_mid = (qry_end - ref_end) / 2
     height_mid = (qry_y - ref_y) / 2
 
+    # Define Bézier curve with 8 control points forming a ribbon
     vertices = [
         (ref_start, ref_y),
         (ref_start, ref_y + height_mid),
@@ -471,6 +500,7 @@ def create_bezier_patch(ref_start, ref_end, qry_start, qry_end,
         zorder=zorder
     )
 
+    # Add enriched border if breakpoint is determined ancestral
     patches_list = []
     enriched_codes = [
         Path.MOVETO,
@@ -524,12 +554,14 @@ def create_bezier_patch(ref_start, ref_end, qry_start, qry_end,
     return patches_list
 
 def draw_structural_variants(ax, alignments, indent_positions):
+    """Draw all SVs as Bézier curves between reference and query genomes."""
     alpha = 0.8
     legend_added = {'INV': False, 'TRANS': False, 'DUP': False}
     sv_handles = dict()
 
     df = deepcopy(alignments)
 
+    # Normalize composite types
     df.loc[df['type'] == 'INVTR', 'type'] = 'TRANS'
     df.loc[df['type'] == 'INVDP', 'type'] = 'DUP'
 
@@ -544,7 +576,7 @@ def draw_structural_variants(ax, alignments, indent_positions):
         'DUP': 'Duplication'
     }
     df['label'] = [label_map[t] for t in df['type']]
-    df.loc[df.duplicated(['label']), 'label'] = ''
+    df.loc[df.duplicated(['label']), 'label'] = ''  # Avoid duplicate legend entries
 
     df['color'] = [color_map[t] for t in df['type']]
     df['line_width'] = 0.1
@@ -572,6 +604,7 @@ def draw_structural_variants(ax, alignments, indent_positions):
     return ax, legend_items
 
 def draw_track_data(ax, track, chromosome, y_base, offset, margin):
+    """Draw either gene rectangles or repeat density line for one chromosome."""
     if chromosome not in track.bin_counts:
         return
 
@@ -591,7 +624,7 @@ def draw_track_data(ax, track, chromosome, y_base, offset, margin):
                 zorder=2
             )
             ax.add_patch(rect)
-    else:
+    else:  # repeats - density line
         positions = [k[0] for k in track.bin_counts[chromosome]]
         densities = [k[1] for k in track.bin_counts[chromosome]]
 
@@ -611,10 +644,12 @@ def draw_track_data(ax, track, chromosome, y_base, offset, margin):
 
         ax.fill_between(shifted_positions, y_positions, y_base, **style)
 
+        # Add 0% and 100% labels
         ax.text(-margin * 2, y_base, '0%', fontsize=3.5, ha='right', va='bottom', color='black')
         ax.text(-margin * 2, y_base + TRACK_HEIGHT, '100%', fontsize=3.5, ha='right', va='top', color='black')
 
 def draw_tracks(ax, tracks, composite):
+    """Draw all tracks (repeats/genes) for both genomes."""
     margin = composite.max_length / 300
 
     tracks_up = 0
@@ -626,6 +661,8 @@ def draw_tracks(ax, tracks, composite):
         if track.genome == "reference":
             y_base = TOP_TRACK_POS - TRACK_HEIGHT + tracks_up * (TRACK_SPACING + TRACK_HEIGHT)
             tracks_up += 1
+
+            # Background rectangle
             ax.add_patch(Rectangle(
                 (0, y_base),
                 composite.ref_total_length,
@@ -640,7 +677,7 @@ def draw_tracks(ax, tracks, composite):
                 if ref_chrom in track.bin_counts:
                     offset = composite.ref_offsets[ref_chrom]
                     draw_track_data(ax, track, ref_chrom, y_base, offset, margin)
-        else:
+        else:  # query genome
             y_base = BOTTOM_TRACK_POS - tracks_down * (TRACK_SPACING + TRACK_HEIGHT)
             tracks_down += 1
             ax.add_patch(Rectangle(
@@ -658,6 +695,7 @@ def draw_tracks(ax, tracks, composite):
                     offset = composite.query_offsets[qry_chrom]
                     draw_track_data(ax, track, qry_chrom, y_base, offset, margin)
 
+        # Build legend entry for this track type
         track_type = track.name
         if not legend_added[track_type]:
             if track_type == 'repeats':
@@ -668,7 +706,7 @@ def draw_tracks(ax, tracks, composite):
                 label = track_type
 
             handle = Rectangle(
-                (0, 0),1, 1,
+                (0, 0), 1, 1,
                 facecolor=track.line_color,
                 alpha=track.track_alpha,
                 label=label
@@ -680,6 +718,7 @@ def draw_tracks(ax, tracks, composite):
     return ax, legend_items
 
 def read_mapping_file(file_path):
+    """Read chromosome grouping config: 'ref_chroms:query_chroms' per line."""
     pairs = []
     with open(file_path, 'r') as f:
         for line in f:
@@ -692,6 +731,7 @@ def read_mapping_file(file_path):
     return pairs
 
 def filter_alignments_for_group(alignments, ref_chroms, query_chroms, composite):
+    """Filter SVs to current chromosome group and convert to composite coordinates."""
     mask = (alignments['ref_chrom'].isin(ref_chroms)) & (alignments['qry_chrom'].isin(query_chroms))
     group_alignments = alignments[mask].copy()
 
@@ -719,6 +759,7 @@ def filter_alignments_for_group(alignments, ref_chroms, query_chroms, composite)
     return group_alignments
 
 def is_valid_mapping_pair(ref_chroms, query_chroms, chromosome_lengths):
+    """Check if all chromosomes in mapping pair exist in genome files."""
     for ref_chrom in ref_chroms:
         if ref_chrom not in chromosome_lengths[0][1]:
             return False
@@ -728,6 +769,7 @@ def is_valid_mapping_pair(ref_chroms, query_chroms, chromosome_lengths):
     return True
 
 def visualizer(args):
+    """Main plotting function. Generates one plot per chromosome group."""
     print('Start visualizing')
     matplotlib.use('agg')
 
@@ -769,6 +811,7 @@ def visualizer(args):
 
         ax = draw_axes(ax, composite)
 
+        # Legend 1: Chromosomes
         ax, indent_positions, chromosome_handles = draw_chromosomes(
             ax, composite, genomes, chromosome_lengths
         )
@@ -785,6 +828,7 @@ def visualizer(args):
         legend1._legend_box.align = "left"
         plt.gca().add_artist(legend1)
 
+        # Legend 2: SV types
         ax, sv_handles = draw_structural_variants(
             ax, group_alignments, indent_positions
         )
@@ -802,6 +846,7 @@ def visualizer(args):
         legend2._legend_box.align = "left"
         plt.gca().add_artist(legend2)
 
+        # Legend 3: Tracks (if any)
         if tracks:
             ax, track_handles = draw_tracks(ax, tracks, composite)
             legend3 = plt.legend(
