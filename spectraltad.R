@@ -1,10 +1,9 @@
 #!/usr/bin/env Rscript
-"""
-Call TAD boundaries using SpectralTAD from Hi-C contact matrices.
 
-Input: Sparse contact matrix (cooler format converted to table)
-Output: BED files with TAD boundaries for each chromosome and hierarchical level
-"""
+#Call TAD boundaries using SpectralTAD from Hi-C contact matrices.
+#Input: Sparse contact matrix (cooler format converted to table)
+#Output: BED files with TAD boundaries for each chromosome and hierarchical level
+
 args <- commandArgs(trailingOnly = TRUE)
 matrix <- args[which(args == "--matrix") + 1]
 out_dir <- args[which(args == "--output") + 1]
