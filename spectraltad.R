@@ -13,10 +13,16 @@ cool_mat <- read.table(matrix)
 sparse_mats = HiCcompare::cooler2sparse(cool_mat)
 spec_tads = lapply(names(sparse_mats), function(x) {
   tryCatch({
-    SpectralTAD(sparse_mats[[x]], chr = x, levels = 2)
+    SpectralTAD(sparse_mats[[x]], chr = x, levels = 3)
   }, error = function(e) {
-    message(paste("Error with chromosome", x, ":", e$message))
-    return(NULL)
+    message(paste("Error (levels=3) with chromosome", x, ":", e$message))
+    message(paste("Trying levels=2 for", x))    
+    tryCatch({
+      SpectralTAD(sparse_mats[[x]], chr = x, levels = 2)
+    }, error = function(e2) {
+      message(paste("Failed even for levels 1-2 for", x, ":", e2$message))
+      return(NULL)
+    })
   })
 })
 for(i in seq_along(spec_tads)) {

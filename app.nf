@@ -1,5 +1,7 @@
 nextflow.enable.dsl = 2
 
+params.outdir = "./genome_annotation_results"
+
 params.genome1 = ""
 params.genome2 = ""
 params.config = ""
@@ -8,14 +10,9 @@ params.mcool_intergenomic = ""
 params.genes1 = ""
 params.genes2 = ""
 
-params.genome3 = ""
-params.eaglec = ""
-params.syri_filtered = ""
-params.repeats1 = ""
-params.repeats2 = ""
-params.mapped_svs = ""
-
 process Repeater2Genome1 {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path genome
 
@@ -39,6 +36,8 @@ process Repeater2Genome1 {
 }
 
 process Repeater2Genome2 {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path genome
 
@@ -62,6 +61,8 @@ process Repeater2Genome2 {
 }
 
 process ExtractGenes1 {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path extract_genes_script
     path genes
@@ -80,6 +81,8 @@ process ExtractGenes1 {
 }
 
 process ExtractGenes2 {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path extract_genes_script
     path genes
@@ -98,6 +101,8 @@ process ExtractGenes2 {
 }
 
 process CreateSyntheticGenomes {
+    publishDir "${params.outdir}/synthetic_genomes", mode: 'copy'
+
     input:
     path genome1
     path genome2
@@ -159,6 +164,8 @@ process CreateSyntheticGenomes {
 }
 
 process SyRI {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path genome1
     path genome2
@@ -181,6 +188,8 @@ process SyRI {
 }
 
 process MappingSyriResults {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path mapping_syri_results_script
     path syri
@@ -201,6 +210,8 @@ process MappingSyriResults {
 }
 
 process EagleC {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path hic
 
@@ -209,9 +220,6 @@ process EagleC {
 
     script:
     """
-    # source /opt/conda/etc/profile.d/conda.sh
-    # conda activate eaglec
-
     # Get resolutions and convert to comma-separated list
     RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{printf "%s,", \$NF}' | sed 's/,\$//')
     echo "Resolutions list: \$RES_LIST"
@@ -264,6 +272,8 @@ process EagleC {
 }
 
 process RunComparison {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path compare_script
     path syri
@@ -286,6 +296,8 @@ process RunComparison {
 }
 
 process AnnotateBreakpointsWithRepeats {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path annotate_breakpoints_script
     path syri_mapped
@@ -314,6 +326,8 @@ process AnnotateBreakpointsWithRepeats {
 }
 
 process PrepareIGVSessions {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path split_breakpoints_script
     path breakpoints_tsv
@@ -373,6 +387,8 @@ process PrepareIGVSessions {
 }
 
 process Visualize {
+    publishDir "${params.outdir}/visualizer", mode: 'copy'
+
     input:
     path visualizer_script
     path structural_variants
@@ -409,6 +425,8 @@ process Visualize {
 }
 
 process SpectralTADAnalysis {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path spectraltad_script
     path hic
@@ -426,11 +444,12 @@ process SpectralTADAnalysis {
     RES_LIST=\$(cooler ls ${hic} | awk -F'/' '{print \$NF}' | tr '\n' ' ')
     echo "Resolutions: \$RES_LIST"
 
+    MAIN_RES=50000
     BEST_RES=0
     for res in \$RES_LIST; do
         if [ \$res -le 200000 ]; then
-            if [ \$res -ge 100000 ]; then
-                if [ \$((100000 - BEST_RES)) -gt \$((res - 100000)) ]; then
+            if [ \$res -ge \$MAIN_RES ]; then
+                if [ \$((MAIN_RES - BEST_RES)) -gt \$((res - MAIN_RES)) ]; then
                     BEST_RES=\$res
                 fi
                 break
@@ -447,25 +466,29 @@ process SpectralTADAnalysis {
         --matrix spectraltad_matrix.txt \\
         --output spectraltad_results/
 
-    echo -e "chr\tstart\tend\tlevel" > all_tads.bed 
     tail -n +2 -q spectraltad_results/*.bed >> all_tads.bed
     """
 }
 
 process RunRepeatOBserver {
+    publishDir "${params.outdir}/centromeres/histograms", pattern: "*/Summary_output/histograms/*", mode: 'copy'
+    publishDir "${params.outdir}/centromeres/Shannon_div", pattern: "*/Summary_output/Shannon_div/*", mode: 'copy'
+    publishDir "${params.outdir}/centromeres/spectra", pattern: "*/Summary_output/spectra/*", mode: 'copy'
+
     input:
-    path repeatobserver_script
     path genome
 
     output:
-    path "SpeciesName_H0-AT_Centromere_histograms_summary.txt"
+    path "output_chromosomes/SpeciesName_H0-AT/Summary_output/histograms/"
+    path "output_chromosomes/SpeciesName_H0-AT/Summary_output/Shannon_div/"
+    path "output_chromosomes/SpeciesName_H0-AT/Summary_output/spectra/"
 
     script:
     """
     source /opt/conda/etc/profile.d/conda.sh
     conda activate repeatobserver
 
-    bash ${repeatobserver_script} \\
+    bash Setup_Run_Repeats.sh \\
         -i SpeciesName \\
         -f ${genome} \\
         -h H0 \\
@@ -478,6 +501,8 @@ process RunRepeatOBserver {
 }
 
 process Compartments {
+    publishDir "${params.outdir}", mode: 'copy'
+
     input:
     path hic
     path genes
@@ -526,7 +551,6 @@ process Compartments {
 workflow {
     genome1 = params.genome1 ? file(params.genome1) : null
     genome2 = params.genome2 ? file(params.genome2) : null
-    //genome3 = file(params.genome3)
     config = params.config ? file(params.config) : null
     mcool_intragenomic = params.mcool_intragenomic ? file(params.mcool_intragenomic) : null
     mcool_intergenomic = params.mcool_intergenomic ? file(params.mcool_intergenomic) : null
@@ -540,26 +564,19 @@ workflow {
     split_breakpoints_script = file("${projectDir}/split_breakpoints.py")
     visualizer_script = file("${projectDir}/visualizer.py")
     spectraltad_script = file("${projectDir}/spectraltad.R")
-    repeatobserver_script = file("${projectDir}/Setup_Run_Repeats.sh") // to docker
 
     repeats1 = genome1 ? Repeater2Genome1(genome1) : null
     repeats2 = genome2 ? Repeater2Genome2(genome2) : null
-    //repeats1 = file(params.repeats1)
-    //repeats2 = file(params.repeats2)
 
     synthetic_genomes = (genome1 && genome2 && config) ? CreateSyntheticGenomes(genome1, genome2, config) : null
     syri_out = synthetic_genomes ? SyRI(synthetic_genomes[0], synthetic_genomes[1]) : null
 
     syri_mapped = (syri_out && synthetic_genomes && genome1 && genome2) ? MappingSyriResults(mapping_syri_results_script, syri_out, synthetic_genomes[2], genome1, genome2) : null
-    //syri_mapped = file(params.mapped_svs)
 
     eaglec = mcool_intergenomic ? EagleC(mcool_intergenomic) : null
-    //eaglec = file(params.eaglec)
 
     comparison = (syri_mapped && eaglec) ? RunComparison(compare_script, syri_mapped, eaglec) : null
     syri_filtered = comparison ? comparison[0] : (syri_mapped ? syri_mapped : null)
-    //syri_filtered = file(params.syri_filtered)
-    //syri_filtered = file(params.mapped_svs)
 
     genes1 = genes1_file ? ExtractGenes1(extract_genes_script, genes1_file) : null
     genes2 = genes2_file ? ExtractGenes2(extract_genes_script, genes2_file) : null
@@ -572,9 +589,7 @@ workflow {
 
     visualize = (breakpoint_annotation && genome1 && genome2 && repeats1 && repeats2 && genes1 && genes2 && config) ? Visualize(visualizer_script, breakpoint_annotation, genome1, genome2, repeats1, repeats2, genes1, genes2, config) : null
 
-    centromeres = genome1 ? RunRepeatOBserver(repeatobserver_script, genome1) : null
-    //centromeres = RunRepeatOBserver(genome2)
-    //centromeres = RunRepeatOBserver(genome3)
+    centromeres = genome1 ? RunRepeatOBserver(genome1) : null
 
     compartments = (mcool_intragenomic && genes1 && genome1) ? Compartments(mcool_intragenomic, genes1, genome1) : null
 }
